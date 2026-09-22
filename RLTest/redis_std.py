@@ -17,6 +17,23 @@ MASTER = 'master'
 SLAVE = 'slave'
 
 
+def hasClusterBusProtectedMode(version):
+    """Whether this redis knows 'cluster-bus-port-protected-mode'.
+
+    Added by redis/redis#15722 on 2026-09-15 and backported to the 8.2, 8.4 and
+    8.6 lines the same day, so the first version carrying it differs per line.
+    `version` is encoded as major * 10000 + minor * 100 + patch, the way
+    StandardEnv._getRedisVersion() returns it.
+    """
+    # The unstable entry is the one version cannot pin down: the option landed
+    # while version.h already said 8.9.241, so an 8.9.x from before it reads as
+    # supporting the option. Harmless in practice - unstable is built from tip.
+    for line, first in ((80900, 80900), (80600, 80607), (80400, 80407), (80200, 80210)):
+        if version >= line:
+            return version >= first
+    return False
+
+
 class StandardEnv(object):
     def __init__(self, redisBinaryPath, port=6379, modulePath=None, moduleArgs=None, outputFilesFormat=None,
                  dbDirPath=None, useSlaves=False, serverId=1, password=None, libPath=None, clusterEnabled=False, decodeResponses=False,
@@ -178,6 +195,7 @@ class StandardEnv(object):
         return int(v[0]) * 10000 + int(v[1]) * 100 + int(v[2])
 
     def createCmdArgs(self, role):
+        redisVersion = self._getRedisVersion()
         cmdArgs = []
         if self.debugger:
             cmdArgs += self.debugger.generate_command(self._getValgrindFilePath(role) if not self.noCatch else None)
@@ -233,6 +251,11 @@ class StandardEnv(object):
                         '--cluster-node-timeout', '5000' if self.clusterNodeTimeout is None else str(self.clusterNodeTimeout)]
             if self.useTLS:
                 cmdArgs += ['--tls-cluster', 'yes']
+            elif hasClusterBusProtectedMode(redisVersion):
+                # Without tls-cluster the cluster bus port is unauthenticated,
+                # and redis refuses to start unless that is acknowledged. The
+                # bus ports of a test env are local and short-lived, so waive it.
+                cmdArgs += ['--cluster-bus-port-protected-mode', 'no']
         if self.useAof:
             cmdArgs += ['--appendonly', 'yes']
             cmdArgs += ['--appendfilename', self._getFileName(role, '.aof')]
@@ -247,7 +270,7 @@ class StandardEnv(object):
 
             cmdArgs += ['--tls-replication', 'yes']
 
-        if self._getRedisVersion() > 70000:
+        if redisVersion > 70000:
             if self.enableDebugCommand:
                 cmdArgs += ['--enable-debug-command', 'yes']
             if self.enableProtectedConfigs:

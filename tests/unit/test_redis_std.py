@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from unittest import TestCase
 
-from RLTest.redis_std import StandardEnv
+from RLTest.redis_std import StandardEnv, hasClusterBusProtectedMode
 from tests.unit.test_common import REDIS_BINARY, TLS_CERT, TLS_KEY, TLS_CACERT
 
 tlsCertFile = 'fake_redis.crt'
@@ -82,6 +82,16 @@ class TestStandardEnv(TestCase):
     def test_has_interactive_debugger(self):
         std_env = StandardEnv(redisBinaryPath=REDIS_BINARY, outputFilesFormat='%s-test')
         assert std_env.has_interactive_debugger == None
+
+    def test_has_cluster_bus_protected_mode(self):
+        # First version carrying redis/redis#15722 on each release line, and
+        # unstable, where version.h read 8.9.241 when the option landed.
+        for version in (80210, 80407, 80607, 81141):
+            assert hasClusterBusProtectedMode(version), version
+        # Last version of each backported line without it, plus the lines that
+        # never got it at all.
+        for version in (80209, 80406, 80606, 80000, 70400, 60200):
+            assert not hasClusterBusProtectedMode(version), version
 
     def test_create_cmd_args_default(self):
         std_env = StandardEnv(redisBinaryPath=REDIS_BINARY, outputFilesFormat='%s-test')
