@@ -272,12 +272,19 @@ def test_example_3():
 
 `Env` and `StandardEnv` accept `clusterBusProtectedMode`:
 
-- `None` (default) leaves Redis configuration unchanged and does not probe the binary.
-- `False` disables protection when supported. On older Redis without the option,
-  the flag is omitted because those versions already have no cluster bus protection.
-- `True` enables protection when supported, or raises `ValueError` if unsupported.
+- `None` (default) omits the option and preserves Redis configuration.
+- `False` sends `no` for Redis 8.11.224 and newer, including current unstable
+  (`255.255.255`). Older release lines default to off, so the option is omitted.
+- `True` sends `yes` for Redis 8.11.224 and newer; older versions raise `ValueError`.
   Redis still requires TLS for a protected cluster bus.
 
+The threshold includes Redis 8.12 MS1, which reports 8.11.224. Version components
+are compared as a tuple; no Redis startup probe is performed. This policy depends
+on [redis/redis#15833](https://github.com/redis/redis/pull/15833) and
+[redis/redis#15834](https://github.com/redis/redis/pull/15834) and rebuilt Redis binaries. Historical
+unstable binaries also reporting 255.255.255 but lacking the option are outside
+this policy; leave the setting unset for those binaries.
+
 Local module test clusters can use `Env(env='oss-cluster', clusterBusProtectedMode=False)`
-across Redis versions without their own version checks. Only disable protection for
-isolated test clusters whose bus ports are accessible to trusted hosts.
+without their own version checks. Only disable protection for isolated test
+clusters whose bus ports are accessible to trusted hosts.

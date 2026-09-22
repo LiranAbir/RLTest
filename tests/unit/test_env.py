@@ -22,7 +22,7 @@ class TestEnvOss(TestCase):
     def test_cluster_bus_setting_forwarding_and_comparison(self):
         # Inspect constructed runners without starting servers: True would
         # require TLS on Redis builds that implement the option.
-        with patch.object(Env, 'start'), patch('RLTest.redis_std.hasClusterBusProtectedMode', return_value=True):
+        with patch.object(Env, 'start'), patch('RLTest.redis_std.StandardEnv._getRedisVersion', return_value=(8, 11, 224)):
             envs = [Env(env='oss-cluster', shardsCount=3, logDir=self.test_dir,
                         redisBinaryPath=REDIS_BINARY, clusterBusProtectedMode=value)
                     for value in (None, False, True)]
