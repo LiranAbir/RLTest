@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 from unittest import TestCase
+from unittest.mock import patch
 
 from RLTest import Env
 from RLTest.redis_cluster import ClusterEnv
@@ -17,6 +18,20 @@ class TestEnvOss(TestCase):
     def tearDown(self):
         # Remove the directory after the test
         shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_cluster_bus_setting_forwarding_and_comparison(self):
+        # Inspect constructed runners without starting servers: True would
+        # require TLS on Redis builds that implement the option.
+        with patch.object(Env, 'start'), patch('RLTest.redis_std.StandardEnv._getRedisVersion', return_value=(8, 11, 224)):
+            envs = [Env(env='oss-cluster', shardsCount=3, logDir=self.test_dir,
+                        redisBinaryPath=REDIS_BINARY, clusterBusProtectedMode=value)
+                    for value in (None, False, True)]
+            for value, env in zip((None, False, True), envs):
+                assert env.clusterBusProtectedMode is value
+                assert all(shard.clusterBusProtectedMode is value for shard in env.envRunner.shards)
+            assert not envs[0].compareEnvs(envs[1])
+            assert not envs[1].compareEnvs(envs[2])
+            assert envs[1].getEnvKwargs()['clusterBusProtectedMode'] is False
 
     def test_compare_envs(self):
         pass

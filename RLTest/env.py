@@ -188,7 +188,7 @@ class Env:
     RTestInstance = None
     EnvCompareParams = ['module', 'moduleArgs', 'env', 'useSlaves', 'shardsCount', 'useAof',
                         'useRdbPreamble', 'forceTcp', 'enableDebugCommand', 'enableProtectedConfigs',
-                        'enableModuleCommand', 'protocol', 'password']
+                        'enableModuleCommand', 'protocol', 'password', 'clusterBusProtectedMode']
 
     def __new__(cls, *args, **kwargs):
         if cls is Env and Defaults.env_class is not None:
@@ -210,7 +210,7 @@ class Env:
                  redisEnterpriseBinaryPath=None, noDefaultModuleArgs=False, clusterNodeTimeout = None,
                  freshEnv=False, enableDebugCommand=None, enableModuleCommand=None, enableProtectedConfigs=None, protocol=None,
                  terminateRetries=None, terminateRetrySecs=None, redisConfigFile=None, dualTLS=False,
-                 startupGraceSecs=None):
+                 startupGraceSecs=None, clusterBusProtectedMode=None):
 
         self.testName = testName if testName else Defaults.curr_test_name
         if self.testName is None:
@@ -247,6 +247,7 @@ class Env:
         self.dmcBinaryPath = expandBinary(dmcBinaryPath) if dmcBinaryPath else Defaults.proxy_binary
         self.redisEnterpriseBinaryPath = expandBinary(redisEnterpriseBinaryPath) if redisEnterpriseBinaryPath else Defaults.re_binary
         self.clusterNodeTimeout = clusterNodeTimeout if clusterNodeTimeout else Defaults.cluster_node_timeout
+        self.clusterBusProtectedMode = clusterBusProtectedMode
         self.port = Defaults.port
         self.enableDebugCommand = enableDebugCommand if enableDebugCommand is not None else Defaults.enable_debug_command
         self.enableProtectedConfigs = enableProtectedConfigs if enableProtectedConfigs is not None\
@@ -373,6 +374,7 @@ class Env:
             'tlsKeyFile': self.tlsKeyFile,
             'tlsCaCertFile': self.tlsCaCertFile,
             'clusterNodeTimeout': self.clusterNodeTimeout,
+            'clusterBusProtectedMode': self.clusterBusProtectedMode,
             'tlsPassphrase': self.tlsPassphrase,
             'port': self.port,
             'enableDebugCommand': self.enableDebugCommand,

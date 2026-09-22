@@ -17,46 +17,13 @@ MASTER = 'master'
 SLAVE = 'slave'
 
 
-_clusterBusProtectedModeSupport = {}
-
-
-def hasClusterBusProtectedMode(redisBinaryPath):
-    """Whether this redis accepts 'cluster-bus-port-protected-mode'.
-
-    Asked of the binary instead of inferred from its version. redis/redis#15722
-    added the option mid-line and it was backported, so the first release
-    carrying it differs per line - 8.2.10, 8.4.7, 8.6.7, 8.8.3, 8.10.2 - and a
-    development build reports a placeholder version that says nothing about the
-    commit it was built from. Only the binary can answer.
-
-    '--port 0' makes redis exit as soon as its configuration has loaded, so this
-    neither binds a port nor leaves a server behind. An unknown directive is
-    rejected earlier, while the configuration is still being parsed, and that is
-    what tells the two cases apart: both exit non-zero.
-
-    The answer is cached per binary, as it is asked once per server started.
-    """
-    if redisBinaryPath not in _clusterBusProtectedModeSupport:
-        p = subprocess.Popen([redisBinaryPath, '--port', '0',
-                              '--cluster-bus-port-protected-mode', 'no'],
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            output = p.communicate(timeout=30)[0].decode('utf-8', 'replace')
-        except subprocess.TimeoutExpired:
-            # Still running, so the configuration was accepted.
-            p.kill()
-            output = ''
-        _clusterBusProtectedModeSupport[redisBinaryPath] = 'Bad directive' not in output
-    return _clusterBusProtectedModeSupport[redisBinaryPath]
-
-
 class StandardEnv(object):
     def __init__(self, redisBinaryPath, port=6379, modulePath=None, moduleArgs=None, outputFilesFormat=None,
                  dbDirPath=None, useSlaves=False, serverId=1, password=None, libPath=None, clusterEnabled=False, decodeResponses=False,
                  useAof=False, useRdbPreamble=True, debugger=None, sanitizer=None, noCatch=False, noLog=False, unix=False, verbose=False, useTLS=False,
                  tlsCertFile=None, tlsKeyFile=None, tlsCaCertFile=None, clusterNodeTimeout=None, tlsPassphrase=None, enableDebugCommand=False, protocol=2,
                  terminateRetries=None, terminateRetrySecs=None, enableProtectedConfigs=False, enableModuleCommand=False, loglevel=None,
-                 redisConfigFile=None, dualTLS=False, startupGraceSecs=0.1
+                 redisConfigFile=None, dualTLS=False, startupGraceSecs=0.1, clusterBusProtectedMode=None
                  ):
         self.uuid = uuid.uuid4().hex
         self.redisBinaryPath = os.path.expanduser(redisBinaryPath) if redisBinaryPath.startswith(
@@ -69,6 +36,9 @@ class StandardEnv(object):
         self.masterServerId = serverId
         self.password = password
         self.clusterEnabled = clusterEnabled
+        if clusterBusProtectedMode is not None and type(clusterBusProtectedMode) is not bool:
+            raise ValueError("clusterBusProtectedMode must be None, False, or True")
+        self.clusterBusProtectedMode = clusterBusProtectedMode
         self.decodeResponses = decodeResponses
         self.useAof = useAof
         self.useRdbPreamble = useRdbPreamble
@@ -208,9 +178,10 @@ class StandardEnv(object):
         out, err = p.communicate()
         out = out.decode('utf-8')
         v = out[out.find("v=") + 2:out.find("sha=") - 1].split('.')
-        return int(v[0]) * 10000 + int(v[1]) * 100 + int(v[2])
+        return tuple(int(part) for part in v)
 
     def createCmdArgs(self, role):
+        redisVersion = self._getRedisVersion()
         cmdArgs = []
         if self.debugger:
             cmdArgs += self.debugger.generate_command(self._getValgrindFilePath(role) if not self.noCatch else None)
@@ -266,11 +237,15 @@ class StandardEnv(object):
                         '--cluster-node-timeout', '5000' if self.clusterNodeTimeout is None else str(self.clusterNodeTimeout)]
             if self.useTLS:
                 cmdArgs += ['--tls-cluster', 'yes']
-            elif hasClusterBusProtectedMode(self.redisBinaryPath):
-                # Without tls-cluster the cluster bus port is unauthenticated,
-                # and redis refuses to start unless that is acknowledged. The
-                # bus ports of a test env are local and short-lived, so waive it.
-                cmdArgs += ['--cluster-bus-port-protected-mode', 'no']
+        if self.clusterBusProtectedMode is not None:
+            # Redis 8.12 MS1 reports 8.11.224; current unstable uses 255.255.255.
+            # Compare components: 8.9.241 must not sort above 8.11.224.
+            if redisVersion >= (8, 11, 224):
+                cmdArgs += ['--cluster-bus-port-protected-mode',
+                            'yes' if self.clusterBusProtectedMode else 'no']
+            elif self.clusterBusProtectedMode:
+                raise ValueError("clusterBusProtectedMode=True requires Redis 8.11.224 or newer")
+            # Older release lines default to protection off, so omit False.
         if self.useAof:
             cmdArgs += ['--appendonly', 'yes']
             cmdArgs += ['--appendfilename', self._getFileName(role, '.aof')]
@@ -285,7 +260,7 @@ class StandardEnv(object):
 
             cmdArgs += ['--tls-replication', 'yes']
 
-        if self._getRedisVersion() > 70000:
+        if redisVersion > (7, 0, 0):
             if self.enableDebugCommand:
                 cmdArgs += ['--enable-debug-command', 'yes']
             if self.enableProtectedConfigs:
