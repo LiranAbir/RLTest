@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from unittest import TestCase
 
-from RLTest.redis_std import StandardEnv, hasClusterBusProtectedMode
+from RLTest.redis_std import MASTER, StandardEnv, hasClusterBusProtectedMode
 from tests.unit.test_common import REDIS_BINARY, TLS_CERT, TLS_KEY, TLS_CACERT
 
 tlsCertFile = 'fake_redis.crt'
@@ -83,15 +83,66 @@ class TestStandardEnv(TestCase):
         std_env = StandardEnv(redisBinaryPath=REDIS_BINARY, outputFilesFormat='%s-test')
         assert std_env.has_interactive_debugger == None
 
-    def test_has_cluster_bus_protected_mode(self):
-        # First version carrying redis/redis#15722 on each release line, and
-        # unstable, where version.h read 8.9.241 when the option landed.
-        for version in (80210, 80407, 80607, 81141):
-            assert hasClusterBusProtectedMode(version), version
-        # Last version of each backported line without it, plus the lines that
-        # never got it at all.
-        for version in (80209, 80406, 80606, 80000, 70400, 60200):
-            assert not hasClusterBusProtectedMode(version), version
+    def _fakeRedisBinary(self, name, startupOutput, version='8.8.0'):
+        """A stand-in redis that reports `version` and prints `startupOutput`.
+
+        Lets the probe be tested against a binary whose version and whose actual
+        support for the option disagree, which is the case version numbers
+        cannot get right.
+        """
+        path = os.path.join(self.test_dir, name)
+        with open(path, 'w') as f:
+            f.write('#!/bin/sh\n'
+                    'case "$1" in --version) echo "Redis server v=%s sha=00000000:0 bits=64"; exit 0;; esac\n'
+                    'echo "%s"\n'
+                    'exit 1\n' % (version, startupOutput))
+        os.chmod(path, 0o755)
+        return path
+
+    def test_has_cluster_bus_protected_mode_probes_the_binary(self):
+        unsupported = self._fakeRedisBinary('redis-unsupported',
+                                            'Bad directive or wrong number of arguments')
+        supported = self._fakeRedisBinary('redis-supported',
+                                          'Configured to not listen anywhere, exiting.')
+        assert not hasClusterBusProtectedMode(unsupported)
+        assert hasClusterBusProtectedMode(supported)
+        # Answer is cached, so removing the binary changes nothing.
+        os.remove(unsupported)
+        assert not hasClusterBusProtectedMode(unsupported)
+
+    def test_create_cmd_args_cluster_bus_protected_mode(self):
+        flag = ['--cluster-bus-port-protected-mode', 'no']
+
+        def args(binary, **kwargs):
+            env = StandardEnv(redisBinaryPath=binary, outputFilesFormat='%s-test',
+                              dbDirPath=self.test_dir, **kwargs)
+            return env.createCmdArgs(MASTER)
+
+        # The option was added mid-release-line and backported, so a version
+        # number cannot say whether a given build has it: 8.8.0 through 8.8.2 do
+        # not, 8.8.3 does, and the same holds for 8.10.1 versus 8.10.2. Passing
+        # it to a build without it is fatal, so these must not be waived blind.
+        for version in ('8.8.0', '8.8.2', '8.10.1', '255.255.255'):
+            binary = self._fakeRedisBinary('redis-no-option-' + version,
+                                           'Bad directive or wrong number of arguments', version)
+            assert flag[0] not in args(binary, clusterEnabled=True), version
+
+        for version in ('8.8.3', '8.10.2', '255.255.255'):
+            binary = self._fakeRedisBinary('redis-with-option-' + version,
+                                           'Configured to not listen anywhere, exiting.', version)
+            cmdArgs = args(binary, clusterEnabled=True)
+            assert cmdArgs[-2:] == flag, (version, cmdArgs)
+
+        supported = self._fakeRedisBinary('redis-plain',
+                                          'Configured to not listen anywhere, exiting.')
+        # Only a cluster node opens a bus port, and tls-cluster authenticates it.
+        assert flag[0] not in args(supported)
+        tlsArgs = args(supported, clusterEnabled=True, useTLS=True,
+                       tlsCertFile=os.path.join(self.test_dir, tlsCertFile),
+                       tlsKeyFile=os.path.join(self.test_dir, tlsKeyFile),
+                       tlsCaCertFile=os.path.join(self.test_dir, tlsCaCertFile))
+        assert flag[0] not in tlsArgs
+        assert '--tls-cluster' in tlsArgs
 
     def test_create_cmd_args_default(self):
         std_env = StandardEnv(redisBinaryPath=REDIS_BINARY, outputFilesFormat='%s-test')

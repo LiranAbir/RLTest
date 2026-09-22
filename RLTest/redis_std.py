@@ -17,21 +17,37 @@ MASTER = 'master'
 SLAVE = 'slave'
 
 
-def hasClusterBusProtectedMode(version):
-    """Whether this redis knows 'cluster-bus-port-protected-mode'.
+_clusterBusProtectedModeSupport = {}
 
-    Added by redis/redis#15722 on 2026-09-15 and backported to the 8.2, 8.4 and
-    8.6 lines the same day, so the first version carrying it differs per line.
-    `version` is encoded as major * 10000 + minor * 100 + patch, the way
-    StandardEnv._getRedisVersion() returns it.
+
+def hasClusterBusProtectedMode(redisBinaryPath):
+    """Whether this redis accepts 'cluster-bus-port-protected-mode'.
+
+    Asked of the binary instead of inferred from its version. redis/redis#15722
+    added the option mid-line and it was backported, so the first release
+    carrying it differs per line - 8.2.10, 8.4.7, 8.6.7, 8.8.3, 8.10.2 - and a
+    development build reports a placeholder version that says nothing about the
+    commit it was built from. Only the binary can answer.
+
+    '--port 0' makes redis exit as soon as its configuration has loaded, so this
+    neither binds a port nor leaves a server behind. An unknown directive is
+    rejected earlier, while the configuration is still being parsed, and that is
+    what tells the two cases apart: both exit non-zero.
+
+    The answer is cached per binary, as it is asked once per server started.
     """
-    # The unstable entry is the one version cannot pin down: the option landed
-    # while version.h already said 8.9.241, so an 8.9.x from before it reads as
-    # supporting the option. Harmless in practice - unstable is built from tip.
-    for line, first in ((80900, 80900), (80600, 80607), (80400, 80407), (80200, 80210)):
-        if version >= line:
-            return version >= first
-    return False
+    if redisBinaryPath not in _clusterBusProtectedModeSupport:
+        p = subprocess.Popen([redisBinaryPath, '--port', '0',
+                              '--cluster-bus-port-protected-mode', 'no'],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            output = p.communicate(timeout=30)[0].decode('utf-8', 'replace')
+        except subprocess.TimeoutExpired:
+            # Still running, so the configuration was accepted.
+            p.kill()
+            output = ''
+        _clusterBusProtectedModeSupport[redisBinaryPath] = 'Bad directive' not in output
+    return _clusterBusProtectedModeSupport[redisBinaryPath]
 
 
 class StandardEnv(object):
@@ -195,7 +211,6 @@ class StandardEnv(object):
         return int(v[0]) * 10000 + int(v[1]) * 100 + int(v[2])
 
     def createCmdArgs(self, role):
-        redisVersion = self._getRedisVersion()
         cmdArgs = []
         if self.debugger:
             cmdArgs += self.debugger.generate_command(self._getValgrindFilePath(role) if not self.noCatch else None)
@@ -251,7 +266,7 @@ class StandardEnv(object):
                         '--cluster-node-timeout', '5000' if self.clusterNodeTimeout is None else str(self.clusterNodeTimeout)]
             if self.useTLS:
                 cmdArgs += ['--tls-cluster', 'yes']
-            elif hasClusterBusProtectedMode(redisVersion):
+            elif hasClusterBusProtectedMode(self.redisBinaryPath):
                 # Without tls-cluster the cluster bus port is unauthenticated,
                 # and redis refuses to start unless that is acknowledged. The
                 # bus ports of a test env are local and short-lived, so waive it.
@@ -270,7 +285,7 @@ class StandardEnv(object):
 
             cmdArgs += ['--tls-replication', 'yes']
 
-        if redisVersion > 70000:
+        if self._getRedisVersion() > 70000:
             if self.enableDebugCommand:
                 cmdArgs += ['--enable-debug-command', 'yes']
             if self.enableProtectedConfigs:
