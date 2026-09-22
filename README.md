@@ -267,3 +267,17 @@ def test_example_3():
     env.assertEqual(con2.get('x'), '1')
 
 ```
+
+### Cluster bus protection
+
+`Env` and `StandardEnv` accept `clusterBusProtectedMode`:
+
+- `None` (default) leaves Redis configuration unchanged and does not probe the binary.
+- `False` disables protection when supported. On older Redis without the option,
+  the flag is omitted because those versions already have no cluster bus protection.
+- `True` enables protection when supported, or raises `ValueError` if unsupported.
+  Redis still requires TLS for a protected cluster bus.
+
+Local module test clusters can use `Env(env='oss-cluster', clusterBusProtectedMode=False)`
+across Redis versions without their own version checks. Only disable protection for
+isolated test clusters whose bus ports are accessible to trusted hosts.

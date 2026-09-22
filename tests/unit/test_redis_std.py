@@ -1,7 +1,9 @@
 import os
 import shutil
 import tempfile
+import subprocess
 from unittest import TestCase
+from unittest.mock import patch
 
 from RLTest.redis_std import MASTER, StandardEnv, hasClusterBusProtectedMode
 from tests.unit.test_common import REDIS_BINARY, TLS_CERT, TLS_KEY, TLS_CACERT
@@ -125,12 +127,12 @@ class TestStandardEnv(TestCase):
         for version in ('8.8.0', '8.8.2', '8.10.1', '255.255.255'):
             binary = self._fakeRedisBinary('redis-no-option-' + version,
                                            'Bad directive or wrong number of arguments', version)
-            assert flag[0] not in args(binary, clusterEnabled=True), version
+            assert flag[0] not in args(binary, clusterEnabled=True, clusterBusProtectedMode=False), version
 
         for version in ('8.8.3', '8.10.2', '255.255.255'):
             binary = self._fakeRedisBinary('redis-with-option-' + version,
                                            'Configured to not listen anywhere, exiting.', version)
-            cmdArgs = args(binary, clusterEnabled=True)
+            cmdArgs = args(binary, clusterEnabled=True, clusterBusProtectedMode=False)
             assert cmdArgs[-2:] == flag, (version, cmdArgs)
 
         supported = self._fakeRedisBinary('redis-plain',
@@ -143,6 +145,40 @@ class TestStandardEnv(TestCase):
                        tlsCaCertFile=os.path.join(self.test_dir, tlsCaCertFile))
         assert flag[0] not in tlsArgs
         assert '--tls-cluster' in tlsArgs
+
+    def test_cluster_bus_probe_rejections_and_timeout(self):
+        for index, output in enumerate((
+                'Unresolved Configuration(s) Detected: Module Configuration detected without loadmodule directive',
+                '', 'unexpected startup failure')):
+            binary = self._fakeRedisBinary('rejected-' + str(index), output)
+            assert not hasClusterBusProtectedMode(binary)
+        with patch('RLTest.redis_std.subprocess.Popen') as popen:
+            process = popen.return_value
+            process.communicate.side_effect = [subprocess.TimeoutExpired('redis', 30), (b'', None)]
+            assert not hasClusterBusProtectedMode(os.path.join(self.test_dir, 'timeout'))
+            process.kill.assert_called_once()
+            assert process.communicate.call_count == 2
+
+    def test_cluster_bus_explicit_settings(self):
+        flag = '--cluster-bus-port-protected-mode'
+        supported = self._fakeRedisBinary('explicit-supported',
+                                          'Configured to not listen anywhere, exiting.')
+        unsupported = self._fakeRedisBinary('explicit-unsupported',
+                                            'Unresolved Configuration(s) Detected')
+        for binary in (supported, unsupported):
+            with patch('RLTest.redis_std.hasClusterBusProtectedMode') as probe:
+                env = StandardEnv(redisBinaryPath=binary, outputFilesFormat='%s-test',
+                                  clusterEnabled=True)
+                assert flag not in env.createCmdArgs(MASTER)
+                probe.assert_not_called()
+        for value in (False, True):
+            env = StandardEnv(redisBinaryPath=supported, outputFilesFormat='%s-test',
+                              clusterEnabled=True, clusterBusProtectedMode=value)
+            args = env.createCmdArgs(MASTER)
+            assert args[args.index(flag) + 1] == ('yes' if value else 'no')
+        with self.assertRaisesRegex(ValueError, 'does not support'):
+            StandardEnv(redisBinaryPath=unsupported, outputFilesFormat='%s-test',
+                        clusterEnabled=True, clusterBusProtectedMode=True)
 
     def test_create_cmd_args_default(self):
         std_env = StandardEnv(redisBinaryPath=REDIS_BINARY, outputFilesFormat='%s-test')

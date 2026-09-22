@@ -43,10 +43,11 @@ def hasClusterBusProtectedMode(redisBinaryPath):
         try:
             output = p.communicate(timeout=30)[0].decode('utf-8', 'replace')
         except subprocess.TimeoutExpired:
-            # Still running, so the configuration was accepted.
+            # A timeout does not establish support. Reap the child after killing it.
             p.kill()
+            p.communicate()
             output = ''
-        _clusterBusProtectedModeSupport[redisBinaryPath] = 'Bad directive' not in output
+        _clusterBusProtectedModeSupport[redisBinaryPath] = 'Configured to not listen anywhere' in output
     return _clusterBusProtectedModeSupport[redisBinaryPath]
 
 
@@ -56,7 +57,7 @@ class StandardEnv(object):
                  useAof=False, useRdbPreamble=True, debugger=None, sanitizer=None, noCatch=False, noLog=False, unix=False, verbose=False, useTLS=False,
                  tlsCertFile=None, tlsKeyFile=None, tlsCaCertFile=None, clusterNodeTimeout=None, tlsPassphrase=None, enableDebugCommand=False, protocol=2,
                  terminateRetries=None, terminateRetrySecs=None, enableProtectedConfigs=False, enableModuleCommand=False, loglevel=None,
-                 redisConfigFile=None, dualTLS=False, startupGraceSecs=0.1
+                 redisConfigFile=None, dualTLS=False, startupGraceSecs=0.1, clusterBusProtectedMode=None
                  ):
         self.uuid = uuid.uuid4().hex
         self.redisBinaryPath = os.path.expanduser(redisBinaryPath) if redisBinaryPath.startswith(
@@ -69,6 +70,9 @@ class StandardEnv(object):
         self.masterServerId = serverId
         self.password = password
         self.clusterEnabled = clusterEnabled
+        if clusterBusProtectedMode is not None and type(clusterBusProtectedMode) is not bool:
+            raise ValueError("clusterBusProtectedMode must be None, False, or True")
+        self.clusterBusProtectedMode = clusterBusProtectedMode
         self.decodeResponses = decodeResponses
         self.useAof = useAof
         self.useRdbPreamble = useRdbPreamble
@@ -266,11 +270,13 @@ class StandardEnv(object):
                         '--cluster-node-timeout', '5000' if self.clusterNodeTimeout is None else str(self.clusterNodeTimeout)]
             if self.useTLS:
                 cmdArgs += ['--tls-cluster', 'yes']
-            elif hasClusterBusProtectedMode(self.redisBinaryPath):
-                # Without tls-cluster the cluster bus port is unauthenticated,
-                # and redis refuses to start unless that is acknowledged. The
-                # bus ports of a test env are local and short-lived, so waive it.
-                cmdArgs += ['--cluster-bus-port-protected-mode', 'no']
+        if self.clusterBusProtectedMode is not None:
+            if hasClusterBusProtectedMode(self.redisBinaryPath):
+                cmdArgs += ['--cluster-bus-port-protected-mode',
+                            'yes' if self.clusterBusProtectedMode else 'no']
+            elif self.clusterBusProtectedMode:
+                raise ValueError("Redis binary does not support cluster-bus-port-protected-mode")
+            # Older Redis has no bus protection, so False needs no option.
         if self.useAof:
             cmdArgs += ['--appendonly', 'yes']
             cmdArgs += ['--appendfilename', self._getFileName(role, '.aof')]
