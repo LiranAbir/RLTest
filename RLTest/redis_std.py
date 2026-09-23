@@ -17,44 +17,11 @@ MASTER = 'master'
 SLAVE = 'slave'
 
 
-_clusterBusProtectedModeSupport = {}
-
-
-def hasClusterBusProtectedMode(redisBinaryPath):
-    """Whether this redis accepts 'cluster-bus-port-protected-mode'.
-
-    Asked of the binary instead of inferred from its version. redis/redis#15722
-    added the option mid-line and it was backported, so the first release
-    carrying it differs per line - 8.2.10, 8.4.7, 8.6.7, 8.8.3, 8.10.2 - and a
-    development build reports a placeholder version that says nothing about the
-    commit it was built from. Only the binary can answer.
-
-    '--port 0' makes redis exit as soon as its configuration has loaded, so this
-    neither binds a port nor leaves a server behind. An unknown directive is
-    rejected earlier, while the configuration is still being parsed, and that is
-    what tells the two cases apart: both exit non-zero.
-
-    The answer is cached per binary, as it is asked once per server started.
-    """
-    if redisBinaryPath not in _clusterBusProtectedModeSupport:
-        p = subprocess.Popen([redisBinaryPath, '--port', '0',
-                              '--cluster-bus-port-protected-mode', 'no'],
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            output = p.communicate(timeout=30)[0].decode('utf-8', 'replace')
-        except subprocess.TimeoutExpired:
-            # Still running, so the configuration was accepted.
-            p.kill()
-            output = ''
-        _clusterBusProtectedModeSupport[redisBinaryPath] = 'Bad directive' not in output
-    return _clusterBusProtectedModeSupport[redisBinaryPath]
-
-
 class StandardEnv(object):
     def __init__(self, redisBinaryPath, port=6379, modulePath=None, moduleArgs=None, outputFilesFormat=None,
                  dbDirPath=None, useSlaves=False, serverId=1, password=None, libPath=None, clusterEnabled=False, decodeResponses=False,
                  useAof=False, useRdbPreamble=True, debugger=None, sanitizer=None, noCatch=False, noLog=False, unix=False, verbose=False, useTLS=False,
-                 tlsCertFile=None, tlsKeyFile=None, tlsCaCertFile=None, clusterNodeTimeout=None, tlsPassphrase=None, enableDebugCommand=False, protocol=2,
+                 tlsCertFile=None, tlsKeyFile=None, tlsCaCertFile=None, clusterNodeTimeout=None, clusterBusPortProtectedMode=None, tlsPassphrase=None, enableDebugCommand=False, protocol=2,
                  terminateRetries=None, terminateRetrySecs=None, enableProtectedConfigs=False, enableModuleCommand=False, loglevel=None,
                  redisConfigFile=None, dualTLS=False, startupGraceSecs=0.1
                  ):
@@ -96,6 +63,11 @@ class StandardEnv(object):
         self.tlsKeyFile = tlsKeyFile
         self.tlsCaCertFile = tlsCaCertFile
         self.clusterNodeTimeout = clusterNodeTimeout
+        # None emits nothing. Set it only for a redis that has the option, as an unknown
+        # directive stops the server from starting: 8.12 and up, where it also defaults to
+        # enabled and so refuses an unauthenticated cluster bus, or one of the backports
+        # (8.2.10, 8.4.7, 8.6.7, 8.8.3, 8.10.2), where it defaults to disabled.
+        self.clusterBusPortProtectedMode = clusterBusPortProtectedMode
         self.tlsPassphrase = tlsPassphrase
         self.enableDebugCommand = enableDebugCommand
         self.enableModuleCommand = enableModuleCommand
@@ -266,11 +238,9 @@ class StandardEnv(object):
                         '--cluster-node-timeout', '5000' if self.clusterNodeTimeout is None else str(self.clusterNodeTimeout)]
             if self.useTLS:
                 cmdArgs += ['--tls-cluster', 'yes']
-            elif hasClusterBusProtectedMode(self.redisBinaryPath):
-                # Without tls-cluster the cluster bus port is unauthenticated,
-                # and redis refuses to start unless that is acknowledged. The
-                # bus ports of a test env are local and short-lived, so waive it.
-                cmdArgs += ['--cluster-bus-port-protected-mode', 'no']
+            if self.clusterBusPortProtectedMode is not None:
+                cmdArgs += ['--cluster-bus-port-protected-mode',
+                            'yes' if self.clusterBusPortProtectedMode in (True, 'yes') else 'no']
         if self.useAof:
             cmdArgs += ['--appendonly', 'yes']
             cmdArgs += ['--appendfilename', self._getFileName(role, '.aof')]
