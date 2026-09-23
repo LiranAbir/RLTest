@@ -189,7 +189,8 @@ class Env:
     RTestInstance = None
     EnvCompareParams = ['module', 'moduleArgs', 'env', 'useSlaves', 'shardsCount', 'useAof',
                         'useRdbPreamble', 'forceTcp', 'enableDebugCommand', 'enableProtectedConfigs',
-                        'enableModuleCommand', 'protocol', 'password']
+                        'enableModuleCommand', 'protocol', 'password',
+                        'clusterBusPortProtectedMode']
 
     def __new__(cls, *args, **kwargs):
         if cls is Env and Defaults.env_class is not None:
