@@ -143,6 +143,7 @@ class Defaults:
     randomize_ports = False
     oss_password = None
     cluster_node_timeout = None
+    cluster_bus_port_protected_mode = None
     curr_test_name = None
     port = 6379
     enable_debug_command = False
@@ -184,7 +185,8 @@ class Env:
     RTestInstance = None
     EnvCompareParams = ['module', 'moduleArgs', 'env', 'useSlaves', 'shardsCount', 'useAof',
                         'useRdbPreamble', 'forceTcp', 'enableDebugCommand', 'enableProtectedConfigs',
-                        'enableModuleCommand', 'protocol', 'password']
+                        'enableModuleCommand', 'protocol', 'password',
+                        'clusterBusPortProtectedMode']
 
     def compareEnvs(self, env):
         if env is None:
@@ -199,6 +201,7 @@ class Env:
                  useAof=None, useRdbPreamble=None, forceTcp=False, useTLS=False, tlsCertFile=None, tlsKeyFile=None,
                  tlsCaCertFile=None, tlsPassphrase=None, logDir=None, redisBinaryPath=None, dmcBinaryPath=None,
                  redisEnterpriseBinaryPath=None, noDefaultModuleArgs=False, clusterNodeTimeout = None,
+                 clusterBusPortProtectedMode=None,
                  freshEnv=False, enableDebugCommand=None, enableModuleCommand=None, enableProtectedConfigs=None, protocol=None,
                  terminateRetries=None, terminateRetrySecs=None, redisConfigFile=None):
 
@@ -237,6 +240,7 @@ class Env:
         self.dmcBinaryPath = expandBinary(dmcBinaryPath) if dmcBinaryPath else Defaults.proxy_binary
         self.redisEnterpriseBinaryPath = expandBinary(redisEnterpriseBinaryPath) if redisEnterpriseBinaryPath else Defaults.re_binary
         self.clusterNodeTimeout = clusterNodeTimeout if clusterNodeTimeout else Defaults.cluster_node_timeout
+        self.clusterBusPortProtectedMode = clusterBusPortProtectedMode if clusterBusPortProtectedMode is not None else Defaults.cluster_bus_port_protected_mode
         self.port = Defaults.port
         self.enableDebugCommand = enableDebugCommand if enableDebugCommand is not None else Defaults.enable_debug_command
         self.enableProtectedConfigs = enableProtectedConfigs if enableProtectedConfigs is not None\
@@ -358,6 +362,7 @@ class Env:
             'tlsKeyFile': self.tlsKeyFile,
             'tlsCaCertFile': self.tlsCaCertFile,
             'clusterNodeTimeout': self.clusterNodeTimeout,
+            'clusterBusPortProtectedMode': self.clusterBusPortProtectedMode,
             'tlsPassphrase': self.tlsPassphrase,
             'port': self.port,
             'enableDebugCommand': self.enableDebugCommand,

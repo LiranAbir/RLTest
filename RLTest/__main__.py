@@ -149,6 +149,12 @@ parser.add_argument(
     help='sets the node timeout on cluster in milliseconds')
 
 parser.add_argument(
+    '--cluster_bus_port_protected_mode', default=None, choices=['yes', 'no'],
+    help='sets cluster-bus-port-protected-mode; only pass it to a redis that has the option '
+         '(8.12 and up, or a backported 8.2.10/8.4.7/8.6.7/8.8.3/8.10.2), as an unknown '
+         'directive stops the server from starting')
+
+parser.add_argument(
     '--cluster_credentials',
     help='enterprise cluster cluster_credentials "username:password", relevent only when running with cluster_existing-env')
 
@@ -538,6 +544,7 @@ class RLTest:
         Defaults.tls_passphrase = self.args.tls_passphrase
         Defaults.oss_password = self.args.oss_password
         Defaults.cluster_node_timeout = self.args.cluster_node_timeout
+        Defaults.cluster_bus_port_protected_mode = self.args.cluster_bus_port_protected_mode
         Defaults.enable_debug_command = True if self.args.allow_unsafe else self.args.enable_debug_command
         Defaults.enable_protected_configs = True if self.args.allow_unsafe else self.args.enable_protected_configs
         Defaults.enable_module_command = True if self.args.allow_unsafe else self.args.enable_module_command
